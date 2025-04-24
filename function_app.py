@@ -3,7 +3,7 @@ import io
 import azure.functions as func
 import logging
 import json
-import logging
+import random
 import requests
 from dotenv import load_dotenv
 import pandas as pd
@@ -34,9 +34,19 @@ def serverlesspokeapi(azqueue: func.QueueMessage):
     logger.info(f"La generación del reporte con id: {id} está en progreso.")
 
     request_info = get_request(id)
+
     pokemons = get_pokemons(request_info[0]["type"])
-    
-    pokemon_bytes = generate_csv_to_blob(pokemons)
+
+    logger.info(f"Se han encontrado los pokemons del tipo: {request_info[0]['type']}")
+    logger.info(f"Obteniendo detalles de los pokemons...")
+
+    ## Recorremos cada pokemon y obtenemos sus detalles
+    pokemons_complete = [get_pokemon_details(pokemon) for pokemon in pokemons ]
+
+    logger.info(f"Se han obtenido los detalles de los pokemons correctamente.")
+
+    pokemon_bytes = generate_csv_to_blob(pokemons_complete)
+
     blob_name = f"poke_report_{id}.csv" # Generamos el nombre del archivo
     upload_csv_to_blob( blob_name = blob_name, csv_data=pokemon_bytes)
     logger.info(f"Finalizado!. El reporte {blob_name} se ha generado correctamente.")
@@ -61,12 +71,41 @@ def get_request(id: int) -> dict:
     response = requests.get(f"{DOMAIN}/api/request/{id}")
     return response.json()
 
-def get_pokemons(type: str) -> dict:
+def get_pokemons(type: str, sample_size: int = None) -> dict:
     pokeapi_url = f"https://pokeapi.co/api/v2/type/{type}"
     response = requests.get(pokeapi_url, timeout=3000)
     data = response.json()
     pokemon_entries = data.get("pokemon", [])
+
+    if sample_size:
+        pokemon_entries = random.sample(pokemon_entries, sample_size)
+        logger.info(f"Se obtuvieron {sample_size} pokemons aleatorios del tipo {type}.")
+
     return [ p["pokemon"] for p in pokemon_entries]
+
+def get_pokemon_details(pokemon: dict) -> dict:
+    name = pokemon["name"]
+    url = pokemon["url"]
+    try:
+        response = requests.get(url, timeout=3000)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error obteniendo los detalles del pokemon '{name}': {e}")
+        raise
+
+    # Obtenemos las habilidades y las separamos por comas
+    abilities = [ability["ability"]["name"] for ability in data.get("abilities", [])]
+    abilities_csv = ", ".join(abilities)
+
+    # Obtenemos las estadísticas base como propiedades de un diccionario
+    base_stats = {stat["stat"]["name"]: stat["base_stat"] for stat in data.get("stats", [])}
+
+    return {
+        **pokemon,
+        **base_stats,  # Desempaquetamos las estadísticas base en el diccionario
+        "abilities": abilities_csv,
+    }
 
 def generate_csv_to_blob(pokemon_list: list) -> bytes:
     df = pd.DataFrame(pokemon_list)
