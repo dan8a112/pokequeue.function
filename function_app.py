@@ -34,8 +34,10 @@ def serverlesspokeapi(azqueue: func.QueueMessage):
     logger.info(f"La generación del reporte con id: {id} está en progreso.")
 
     request_info = get_request(id)
+    sample_size = request_info[0].get("sample_size")
 
-    pokemons = get_pokemons(request_info[0]["type"])
+    # Se obtiene los pokemons del tipo solicitado 
+    pokemons = get_pokemons(request_info[0]["type"], sample_size or None)
 
     logger.info(f"Se han encontrado los pokemons del tipo: {request_info[0]['type']}")
     logger.info(f"Obteniendo detalles de los pokemons...")
