@@ -84,3 +84,46 @@ def upload_csv_to_blob( blob_name: str, csv_data: bytes):
     except Exception as e:
         logger.error(f"Error al subir el archivo {e}")
         raise
+
+
+@app.queue_trigger(arg_name="azqueue", 
+                   queue_name="delete-requests",
+                   connection="QueueAzureWebJobsStorage") 
+def deletepokereport(azqueue: func.QueueMessage):
+    body = azqueue.get_body().decode('utf-8')
+    record = json.loads(body)
+    id = record[0]['id']
+
+    update_request(id, "deleting")
+    logger.info(f"Request {id} is being deleted.")
+
+    blob_name = f"poke_report_{id}.csv"
+
+    delete_blob_from_storage(blob_name)
+    logger.info(f"Blob {blob_name} deleted from storage.")
+
+    delete_request(id)
+    logger.info(f"Request {id} deleted from the database.")
+
+def delete_request(id: int) -> dict:
+    try:
+        response = requests.delete(f"{DOMAIN}/api/request/{id}")
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error al intentar eliminar la solicitud {id}: {e}")
+        raise
+    
+def delete_blob_from_storage(blob_name: str):
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        blob_client = blob_service_client.get_blob_client(container=BLOB_CONTAINER_NAME, blob=blob_name)
+        
+        if blob_client.exists():
+            blob_client.delete_blob()
+            logger.info(f"Archivo '{blob_name}' eliminado correctamente.")
+        else:
+            logger.warning(f"El archivo '{blob_name}' no existe en el contenedor.")
+
+    except Exception as e:
+        logger.error(f"Error al intentar eliminar el archivo '{blob_name}': {e}")
+        raise
